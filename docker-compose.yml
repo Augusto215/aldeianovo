@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    # Na VPS, crie backend/.env com DATABASE_URL, DIRECT_URL, JWT_SECRET
+    # e CORS_ORIGIN (a URL pública do site, ex.: https://seudominio.com).
+    env_file: backend/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3333/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
