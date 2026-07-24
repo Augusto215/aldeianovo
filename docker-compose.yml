@@ -18,8 +18,11 @@ services:
     build:
       context: .
       target: frontend
+    # A porta 80 do host já está em uso (proxy reverso de outros projetos na
+    # VPS) — publica em 8080 e o nginx/proxy do host deve rotear o domínio
+    # da Aldeia para 127.0.0.1:8080.
     ports:
-      - "80:80"
+      - "8080:80"
     depends_on:
       - backend
     restart: unless-stopped
