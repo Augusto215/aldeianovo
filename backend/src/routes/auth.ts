@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { env } from '../env.js';
-import { prisma } from '../lib/prisma.js';
+import { supabase } from '../lib/supabase.js';
 import { userToJson } from '../lib/serialize.js';
 
 export const authRouter = Router();
@@ -22,7 +22,11 @@ authRouter.post('/login', async (req, res) => {
   }
 
   const { email, password } = parsed.data;
-  const user = await prisma.user.findUnique({ where: { email } });
+  const { data: user } = await supabase
+    .from('User')
+    .select('*')
+    .eq('email', email)
+    .maybeSingle();
 
   if (!user || !user.active || !(await bcrypt.compare(password, user.passwordHash))) {
     return res.status(401).json({ error: 'E-mail ou senha incorretos' });
@@ -42,19 +46,21 @@ authRouter.post('/forgot-password', async (req, res) => {
     return res.status(400).json({ error: 'E-mail inválido' });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email: parsed.data.email },
-  });
+  const { data: user } = await supabase
+    .from('User')
+    .select('id, email')
+    .eq('email', parsed.data.email)
+    .maybeSingle();
 
   if (user) {
     const token = crypto.randomBytes(32).toString('hex');
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
+    await supabase
+      .from('User')
+      .update({
         resetToken: token,
-        resetTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1h
-      },
-    });
+        resetTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1h
+      })
+      .eq('id', user.id);
     // TODO: enviar por e-mail (serviço de e-mail ainda não configurado).
     // Por enquanto o link é registrado no log do servidor.
     console.log(
@@ -78,22 +84,28 @@ authRouter.post('/reset-password', async (req, res) => {
       .json({ error: 'Token inválido ou senha com menos de 8 caracteres' });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { resetToken: parsed.data.token },
-  });
+  const { data: user } = await supabase
+    .from('User')
+    .select('id, resetTokenExpiresAt')
+    .eq('resetToken', parsed.data.token)
+    .maybeSingle();
 
-  if (!user || !user.resetTokenExpiresAt || user.resetTokenExpiresAt < new Date()) {
+  if (
+    !user ||
+    !user.resetTokenExpiresAt ||
+    new Date(user.resetTokenExpiresAt) < new Date()
+  ) {
     return res.status(400).json({ error: 'Token inválido ou expirado' });
   }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
+  await supabase
+    .from('User')
+    .update({
       passwordHash: await bcrypt.hash(parsed.data.password, 10),
       resetToken: null,
       resetTokenExpiresAt: null,
-    },
-  });
+    })
+    .eq('id', user.id);
 
   return res.json({ message: 'Senha redefinida com sucesso' });
 });

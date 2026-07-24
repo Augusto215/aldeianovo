@@ -2,10 +2,12 @@
  * Seed do banco — usuários, contas, categorias e movimentações de exemplo.
  * Rode com: npm run db:seed (idempotente: pode rodar mais de uma vez).
  */
-import { PrismaClient, TxType, TxStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { supabase } from '../lib/supabase.js';
 
-const prisma = new PrismaClient();
+type TxType = 'RECEITA' | 'DESPESA';
+type TxStatus = 'PAGO' | 'PENDENTE';
+type AccountType = 'CORRENTE' | 'POUPANCA' | 'CAIXA';
 
 const ADMIN_EMAIL = 'admin@apoinme.org.br';
 const ADMIN_PASSWORD = 'apoinme123';
@@ -21,40 +23,70 @@ async function main() {
     { name: 'Carlos Potiguara', email: 'carlos@apoinme.org.br', role: 'LEITURA' as const },
   ];
   for (const u of usersData) {
-    await prisma.user.upsert({
-      where: { email: u.email },
-      update: {},
-      create: { ...u, passwordHash: password },
-    });
+    const { data: existing } = await supabase
+      .from('User')
+      .select('id')
+      .eq('email', u.email)
+      .maybeSingle();
+    if (!existing) {
+      const { error } = await supabase
+        .from('User')
+        .insert({ ...u, passwordHash: password });
+      if (error) throw error;
+    }
   }
-  const admin = await prisma.user.findUniqueOrThrow({
-    where: { email: ADMIN_EMAIL },
-  });
+  const { data: admin, error: adminError } = await supabase
+    .from('User')
+    .select('id')
+    .eq('email', ADMIN_EMAIL)
+    .single();
+  if (adminError || !admin) throw adminError ?? new Error('Admin não encontrado após seed');
 
   // ── Contas (balance = saldo inicial) ────────────────────────
-  const accountsData = [
-    { name: 'Conta Movimento', bank: 'Banco do Brasil', type: 'CORRENTE' as const, balance: 50000 },
-    { name: 'Reserva Projetos', bank: 'Caixa Econômica', type: 'POUPANCA' as const, balance: 80000 },
-    { name: 'Fundo Emergencial', bank: 'Sicoob', type: 'POUPANCA' as const, balance: 42000 },
-    { name: 'Caixa Local', bank: null, type: 'CAIXA' as const, balance: 2000 },
+  const accountsData: { name: string; bank: string | null; type: AccountType; balance: number }[] = [
+    { name: 'Conta Movimento', bank: 'Banco do Brasil', type: 'CORRENTE', balance: 50000 },
+    { name: 'Reserva Projetos', bank: 'Caixa Econômica', type: 'POUPANCA', balance: 80000 },
+    { name: 'Fundo Emergencial', bank: 'Sicoob', type: 'POUPANCA', balance: 42000 },
+    { name: 'Caixa Local', bank: null, type: 'CAIXA', balance: 2000 },
   ];
   const accounts: Record<string, string> = {};
   for (const a of accountsData) {
-    const existing = await prisma.account.findFirst({ where: { name: a.name } });
-    const acc = existing ?? (await prisma.account.create({ data: a }));
-    accounts[a.name] = acc.id;
+    const { data: existing } = await supabase
+      .from('Account')
+      .select('id')
+      .eq('name', a.name)
+      .maybeSingle();
+    if (existing) {
+      accounts[a.name] = existing.id;
+    } else {
+      const { data: created, error } = await supabase
+        .from('Account')
+        .insert(a)
+        .select('id')
+        .single();
+      if (error || !created) throw error ?? new Error('Falha ao criar conta');
+      accounts[a.name] = created.id;
+    }
   }
 
   // ── Categorias ──────────────────────────────────────────────
   const categoryNames = ['Projetos', 'Pessoal', 'Logística', 'Eventos', 'Administrativo', 'Doações'];
   const categories: Record<string, string> = {};
   for (const name of categoryNames) {
-    const c = await prisma.category.upsert({ where: { name }, update: {}, create: { name } });
+    const { data: c, error } = await supabase
+      .from('Category')
+      .upsert({ name }, { onConflict: 'name' })
+      .select('id')
+      .single();
+    if (error || !c) throw error ?? new Error('Falha ao criar categoria');
     categories[name] = c.id;
   }
 
   // ── Movimentações (últimos 8 meses) ─────────────────────────
-  if ((await prisma.transaction.count()) > 0) {
+  const { count } = await supabase
+    .from('Transaction')
+    .select('id', { count: 'exact', head: true });
+  if (count && count > 0) {
     console.log('Transações já existem — seed de movimentações ignorado.');
     return;
   }
@@ -114,26 +146,25 @@ async function main() {
     [7, 26, 'Administrativo geral', 'Administrativo', 'Conta Movimento', 'DESPESA', 13500, 'PAGO'],
   ];
 
-  await prisma.transaction.createMany({
-    data: rows.map(([back, day, description, category, account, type, amount, status]) => ({
+  const { error: txError } = await supabase.from('Transaction').insert(
+    rows.map(([back, day, description, category, account, type, amount, status]) => ({
       description,
       amount,
       type,
       status,
-      date: month(back, day),
+      date: month(back, day).toISOString().slice(0, 10),
       accountId: accounts[account],
       categoryId: categories[category],
       userId: admin.id,
     })),
-  });
+  );
+  if (txError) throw txError;
 
   console.log(`✅ Seed concluído: ${rows.length} transações, ${accountsData.length} contas, ${usersData.length} usuários.`);
   console.log(`   Login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

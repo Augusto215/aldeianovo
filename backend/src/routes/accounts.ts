@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import { supabase } from '../lib/supabase.js';
 import { accountToJson } from '../lib/serialize.js';
 import { requireRole, CAN_WRITE } from '../middleware/auth.js';
 
@@ -20,27 +20,29 @@ const accountSchema = z.object({
  * Transações pendentes não afetam o saldo.
  */
 async function currentBalances(): Promise<Map<string, number>> {
-  const sums = await prisma.transaction.groupBy({
-    by: ['accountId', 'type'],
-    where: { status: 'PAGO' },
-    _sum: { amount: true },
-  });
+  const { data } = await supabase
+    .from('Transaction')
+    .select('accountId, type, amount')
+    .eq('status', 'PAGO');
+
   const map = new Map<string, number>();
-  for (const s of sums) {
-    const delta = Number(s._sum.amount ?? 0) * (s.type === 'RECEITA' ? 1 : -1);
-    map.set(s.accountId, (map.get(s.accountId) ?? 0) + delta);
+  for (const t of data ?? []) {
+    const delta = Number(t.amount) * (t.type === 'RECEITA' ? 1 : -1);
+    map.set(t.accountId, (map.get(t.accountId) ?? 0) + delta);
   }
   return map;
 }
 
 // GET /api/accounts
 accountsRouter.get('/', async (_req, res) => {
-  const [accounts, deltas] = await Promise.all([
-    prisma.account.findMany({ orderBy: { createdAt: 'asc' } }),
+  const [{ data: accounts, error }, deltas] = await Promise.all([
+    supabase.from('Account').select('*').order('createdAt', { ascending: true }),
     currentBalances(),
   ]);
+  if (error) return res.status(500).json({ error: 'Erro ao buscar contas' });
+
   return res.json(
-    accounts.map((a) =>
+    (accounts ?? []).map((a) =>
       accountToJson(a, Number(a.balance) + (deltas.get(a.id) ?? 0)),
     ),
   );
@@ -51,7 +53,13 @@ accountsRouter.post('/', requireRole(...CAN_WRITE), async (req, res) => {
   const parsed = accountSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos' });
 
-  const account = await prisma.account.create({ data: parsed.data });
+  const { data: account, error } = await supabase
+    .from('Account')
+    .insert(parsed.data)
+    .select()
+    .single();
+  if (error || !account) return res.status(500).json({ error: 'Erro ao criar conta' });
+
   return res.status(201).json(accountToJson(account, Number(account.balance)));
 });
 
@@ -60,31 +68,36 @@ accountsRouter.put('/:id', requireRole(...CAN_WRITE), async (req, res) => {
   const parsed = accountSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos' });
 
-  try {
-    const account = await prisma.account.update({
-      where: { id: String(req.params.id) },
-      data: parsed.data,
-    });
-    return res.json(accountToJson(account, Number(account.balance)));
-  } catch {
-    return res.status(404).json({ error: 'Conta não encontrada' });
-  }
+  const { data: account, error } = await supabase
+    .from('Account')
+    .update(parsed.data)
+    .eq('id', String(req.params.id))
+    .select()
+    .maybeSingle();
+  if (error || !account) return res.status(404).json({ error: 'Conta não encontrada' });
+
+  return res.json(accountToJson(account, Number(account.balance)));
 });
 
 // DELETE /api/accounts/:id
 accountsRouter.delete('/:id', requireRole(...CAN_WRITE), async (req, res) => {
-  const count = await prisma.transaction.count({
-    where: { accountId: String(req.params.id) },
-  });
-  if (count > 0) {
+  const { count } = await supabase
+    .from('Transaction')
+    .select('id', { count: 'exact', head: true })
+    .eq('accountId', String(req.params.id));
+  if (count && count > 0) {
     return res
       .status(409)
       .json({ error: 'Conta possui transações e não pode ser excluída' });
   }
-  try {
-    await prisma.account.delete({ where: { id: String(req.params.id) } });
-    return res.status(204).end();
-  } catch {
+
+  const { data, error } = await supabase
+    .from('Account')
+    .delete()
+    .eq('id', String(req.params.id))
+    .select('id');
+  if (error || !data || data.length === 0) {
     return res.status(404).json({ error: 'Conta não encontrada' });
   }
+  return res.status(204).end();
 });

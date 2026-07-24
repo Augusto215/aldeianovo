@@ -1,21 +1,28 @@
-import type { Prisma } from '@prisma/client';
-
 /**
  * Serialização para o formato consumido pelo frontend:
- * enums em minúsculas, Decimal → number e datas como YYYY-MM-DD.
+ * enums em minúsculas, numeric (string) → number.
  */
 
-type TxWithRelations = Prisma.TransactionGetPayload<{
-  include: { account: true; category: true };
-}>;
+type TxWithRelations = {
+  id: string;
+  date: string; // coluna `date` — já vem como 'YYYY-MM-DD'
+  description: string;
+  amount: string | number;
+  type: 'RECEITA' | 'DESPESA';
+  status: 'PAGO' | 'PENDENTE';
+  accountId: string;
+  categoryId: string | null;
+  account: { name: string } | null;
+  category: { name: string } | null;
+};
 
 export function txToJson(t: TxWithRelations) {
   return {
     id: t.id,
-    date: t.date.toISOString().slice(0, 10),
+    date: t.date,
     description: t.description,
     category: t.category?.name ?? 'Sem categoria',
-    account: t.account.name,
+    account: t.account?.name ?? '',
     accountId: t.accountId,
     categoryId: t.categoryId,
     type: t.type.toLowerCase() as 'receita' | 'despesa',
@@ -32,10 +39,14 @@ export type AccountJson = {
   balance: number;
 };
 
-export function accountToJson(
-  a: Prisma.AccountGetPayload<object>,
-  currentBalance: number,
-): AccountJson {
+type AccountRow = {
+  id: string;
+  name: string;
+  bank: string | null;
+  type: 'CORRENTE' | 'POUPANCA' | 'CAIXA';
+};
+
+export function accountToJson(a: AccountRow, currentBalance: number): AccountJson {
   return {
     id: a.id,
     name: a.name,
@@ -52,7 +63,15 @@ const ROLE_LABEL: Record<string, string> = {
   LEITURA: 'Leitura',
 };
 
-export function userToJson(u: Prisma.UserGetPayload<object>) {
+type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  active: boolean;
+};
+
+export function userToJson(u: UserRow) {
   return {
     id: u.id,
     name: u.name,

@@ -12,7 +12,6 @@
     "dev:api": "npm run dev --workspace backend",
     "build": "npm run build --workspace frontend",
     "lint": "npm run lint --workspace frontend",
-    "db:push": "npm run db:push --workspace backend",
     "db:seed": "npm run db:seed --workspace backend"
   },
   "engines": {

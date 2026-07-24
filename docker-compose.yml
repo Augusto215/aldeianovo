@@ -3,8 +3,8 @@ services:
     build:
       context: .
       target: backend
-    # Na VPS, crie backend/.env com DATABASE_URL, DIRECT_URL, JWT_SECRET
-    # e CORS_ORIGIN (a URL pública do site, ex.: https://seudominio.com).
+    # Na VPS, crie backend/.env com SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+    # JWT_SECRET e CORS_ORIGIN (a URL pública do site, ex.: https://seudominio.com).
     env_file: backend/.env
     restart: unless-stopped
     healthcheck:

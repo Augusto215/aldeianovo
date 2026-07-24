@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import type { Role } from '@prisma/client';
 import { env } from '../env.js';
+
+export type Role = 'ADMIN' | 'COORDENACAO' | 'FINANCEIRO' | 'LEITURA';
 
 export interface AuthedRequest extends Request {
   userId?: string;

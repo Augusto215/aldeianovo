@@ -1,5 +1,5 @@
 import { Router, type Response } from 'express';
-import { prisma } from '../lib/prisma.js';
+import { supabase } from '../lib/supabase.js';
 import { txToJson } from '../lib/serialize.js';
 
 export const reportsRouter = Router();
@@ -24,34 +24,45 @@ reportsRouter.get('/summary', async (req, res) => {
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1));
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const startColumn = start.toISOString().slice(0, 10);
 
-  const [accounts, paidSums, pendencias, txs, recentRows] = await Promise.all([
-    prisma.account.findMany(),
-    prisma.transaction.groupBy({
-      by: ['type'],
-      where: { status: 'PAGO' },
-      _sum: { amount: true },
-    }),
-    prisma.transaction.count({ where: { status: 'PENDENTE' } }),
-    prisma.transaction.findMany({
-      where: { date: { gte: start } },
-      include: { category: true },
-      orderBy: { date: 'asc' },
-    }),
-    prisma.transaction.findMany({
-      include: { account: true, category: true },
-      orderBy: { date: 'desc' },
-      take: 6,
-    }),
+  const [
+    { data: accounts },
+    { data: paidRows },
+    { count: pendencias },
+    { data: txRows },
+    { data: recentRows },
+  ] = await Promise.all([
+    supabase.from('Account').select('*'),
+    supabase.from('Transaction').select('type, amount').eq('status', 'PAGO'),
+    supabase
+      .from('Transaction')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'PENDENTE'),
+    supabase
+      .from('Transaction')
+      .select('*, category:Category(*)')
+      .gte('date', startColumn)
+      .order('date', { ascending: true }),
+    supabase
+      .from('Transaction')
+      .select('*, account:Account(*), category:Category(*)')
+      .order('date', { ascending: false })
+      .limit(6),
   ]);
 
+  const accountsList = accounts ?? [];
+  // A coluna `date` chega como 'YYYY-MM-DD'; convertida para Date (UTC) para
+  // permitir os cálculos de mês abaixo (getUTCFullYear/getUTCMonth).
+  const txs = (txRows ?? []).map((t) => ({ ...t, date: new Date(t.date) }));
+
   // Saldo real: saldo inicial das contas + receitas pagas − despesas pagas.
-  const initial = accounts.reduce((s, a) => s + Number(a.balance), 0);
-  const paid = Object.fromEntries(
-    paidSums.map((s) => [s.type, Number(s._sum.amount ?? 0)]),
-  );
-  const saldoTotal =
-    initial + (paid.RECEITA ?? 0) - (paid.DESPESA ?? 0);
+  const initial = accountsList.reduce((s, a) => s + Number(a.balance), 0);
+  const paid = (paidRows ?? []).reduce<Record<string, number>>((acc, r) => {
+    acc[r.type] = (acc[r.type] ?? 0) + Number(r.amount);
+    return acc;
+  }, {});
+  const saldoTotal = initial + (paid.RECEITA ?? 0) - (paid.DESPESA ?? 0);
 
   // Fluxo de caixa mensal (últimos N meses).
   const cashFlow = Array.from({ length: months }, (_, i) => {
@@ -98,15 +109,15 @@ reportsRouter.get('/summary', async (req, res) => {
       resultadoMes: current.saldo,
       variacaoReceita: variation(current.receita, previous?.receita),
       variacaoDespesa: variation(current.despesa, previous?.despesa),
-      pendencias,
-      contas: accounts.length,
+      pendencias: pendencias ?? 0,
+      contas: accountsList.length,
     },
     cashFlow: flow,
     expensesByCategory: [...catCurrent.entries()]
       .map(([category, value]) => ({ category, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 6),
-    recent: recentRows.map(txToJson),
+    recent: (recentRows ?? []).map(txToJson),
   });
 });
 
@@ -114,19 +125,21 @@ function sendCsv(res: Response, filename: string, lines: string[]) {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   // BOM para o Excel reconhecer UTF-8
-  return res.send('\uFEFF' + lines.join('\n'));
+  return res.send('﻿' + lines.join('\n'));
 }
 
 // GET /api/reports/export/transactions.csv — exportação básica dos dados
 reportsRouter.get('/export/transactions.csv', async (_req, res) => {
-  const rows = await prisma.transaction.findMany({
-    include: { account: true, category: true },
-    orderBy: { date: 'desc' },
-  });
+  const { data: rows, error } = await supabase
+    .from('Transaction')
+    .select('*, account:Account(*), category:Category(*)')
+    .order('date', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Erro ao exportar' });
+
   const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
   const lines = [
     'data;descricao;categoria;conta;tipo;status;valor',
-    ...rows.map(txToJson).map((t) =>
+    ...(rows ?? []).map(txToJson).map((t) =>
       [
         t.date,
         esc(t.description),
@@ -146,11 +159,16 @@ reportsRouter.get('/export/monthly.csv', async (req, res) => {
   const months = Math.min(Number(req.query.months) || 8, 24);
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1));
+  const startColumn = start.toISOString().slice(0, 10);
 
-  const txs = await prisma.transaction.findMany({
-    where: { date: { gte: start } },
-    orderBy: { date: 'asc' },
-  });
+  const { data: txRows, error } = await supabase
+    .from('Transaction')
+    .select('date, type, amount')
+    .gte('date', startColumn)
+    .order('date', { ascending: true });
+  if (error) return res.status(500).json({ error: 'Erro ao exportar' });
+
+  const txs = (txRows ?? []).map((t) => ({ ...t, date: new Date(t.date) }));
 
   const buckets = new Map<string, { receita: number; despesa: number }>();
   for (let i = 0; i < months; i++) {

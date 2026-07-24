@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { prisma } from '../lib/prisma.js';
+import { supabase } from '../lib/supabase.js';
 import { userToJson } from '../lib/serialize.js';
 import { requireRole, type AuthedRequest } from '../middleware/auth.js';
 
@@ -11,8 +11,13 @@ const ROLES = ['ADMIN', 'COORDENACAO', 'FINANCEIRO', 'LEITURA'] as const;
 
 // GET /api/users
 usersRouter.get('/', async (_req, res) => {
-  const users = await prisma.user.findMany({ orderBy: { createdAt: 'asc' } });
-  return res.json(users.map(userToJson));
+  const { data: users, error } = await supabase
+    .from('User')
+    .select('*')
+    .order('createdAt', { ascending: true });
+  if (error) return res.status(500).json({ error: 'Erro ao buscar usuários' });
+
+  return res.json((users ?? []).map(userToJson));
 });
 
 // POST /api/users — apenas ADMIN cria usuários
@@ -31,19 +36,25 @@ usersRouter.post('/', requireRole('ADMIN'), async (req, res) => {
       .json({ error: 'Dados inválidos (senha mínima: 8 caracteres)' });
   }
 
-  const exists = await prisma.user.findUnique({
-    where: { email: parsed.data.email },
-  });
+  const { data: exists } = await supabase
+    .from('User')
+    .select('id')
+    .eq('email', parsed.data.email)
+    .maybeSingle();
   if (exists) return res.status(409).json({ error: 'E-mail já cadastrado' });
 
-  const user = await prisma.user.create({
-    data: {
+  const { data: user, error } = await supabase
+    .from('User')
+    .insert({
       name: parsed.data.name,
       email: parsed.data.email,
       role: parsed.data.role,
       passwordHash: await bcrypt.hash(parsed.data.password, 10),
-    },
-  });
+    })
+    .select()
+    .single();
+  if (error || !user) return res.status(500).json({ error: 'Erro ao criar usuário' });
+
   return res.status(201).json(userToJson(user));
 });
 
@@ -62,13 +73,13 @@ usersRouter.put('/:id', requireRole('ADMIN'), async (req: AuthedRequest, res) =>
     return res.status(400).json({ error: 'Você não pode desativar a si mesmo' });
   }
 
-  try {
-    const user = await prisma.user.update({
-      where: { id: String(req.params.id) },
-      data: parsed.data,
-    });
-    return res.json(userToJson(user));
-  } catch {
-    return res.status(404).json({ error: 'Usuário não encontrado' });
-  }
+  const { data: user, error } = await supabase
+    .from('User')
+    .update(parsed.data)
+    .eq('id', String(req.params.id))
+    .select()
+    .maybeSingle();
+  if (error || !user) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+  return res.json(userToJson(user));
 });

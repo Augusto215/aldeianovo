@@ -3,8 +3,8 @@ import { Router } from 'express';
 /**
  * GED — Gestão Eletrônica de Documentos (Etapa 2).
  * Esqueleto de rotas; a implementação inicia após a conclusão da Etapa 1.
- * Ver docs/ESPECIFICACAO.md e os modelos Document, DocumentVersion,
- * AuditLog e RetentionRule em prisma/schema.prisma.
+ * Ver docs/ESPECIFICACAO.md e as tabelas Document, DocumentVersion,
+ * AuditLog e RetentionRule em sql/schema.sql.
  *
  * Requisitos ao implementar:
  * - Toda ação (visualizar, baixar, editar, assinar, excluir) grava AuditLog

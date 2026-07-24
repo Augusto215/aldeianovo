@@ -14,14 +14,15 @@ está em [docs/ESPECIFICACAO.md](docs/ESPECIFICACAO.md).
 
 > A Etapa 1 é **funcional de ponta a ponta**: autenticação com JWT + bcrypt,
 > CRUD de transações/contas/categorias/usuários, relatórios e exportação CSV,
-> com dados persistidos em **PostgreSQL (Supabase)** via Prisma.
+> com dados persistidos em **PostgreSQL (Supabase)** via `@supabase/supabase-js`.
 
 ## Estrutura
 
 ```
 projeto-aldeia/
 ├── frontend/        # React + Vite + TypeScript + Tailwind + Recharts
-├── backend/         # Node + Express + TypeScript + Prisma (esqueleto)
+├── backend/         # Node + Express + TypeScript + @supabase/supabase-js (esqueleto)
+│   └── sql/schema.sql  # DDL — rodar uma vez no SQL Editor do Supabase
 ├── docs/            # Especificação completa do sistema
 ├── package.json     # workspaces (frontend + backend)
 └── README.md
@@ -58,11 +59,11 @@ npm install
 
 # 2. Configurar o banco (Supabase)
 cp backend/.env.example backend/.env
-# → edite backend/.env e cole as connection strings do seu projeto
-#   (painel do Supabase: Connect → ORMs → Prisma)
+# → edite backend/.env e cole SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY
+#   do seu projeto (painel do Supabase: Project Settings → API)
 
-# 3. Criar as tabelas e popular com dados de exemplo
-npm run db:push
+# 3. Criar as tabelas (uma vez, no SQL Editor do painel do Supabase,
+#    colando o conteúdo de backend/sql/schema.sql) e popular com dados de exemplo
 npm run db:seed
 
 # 4. Rodar a API
@@ -89,7 +90,7 @@ npm run dev            # http://localhost:5173
 ### Etapa 1
 - [x] Conectar o frontend à API real
 - [x] Autenticação JWT + recuperação de senha (link por e-mail pendente)
-- [x] Banco modelado com Prisma + Supabase
+- [x] Banco modelado no Supabase (PostgreSQL) via `@supabase/supabase-js`
 - [x] CRUD de transações, contas e usuários
 - [x] Relatórios e exportação CSV
 - [ ] Serviço de e-mail (recuperação de senha / notificações)
@@ -107,4 +108,4 @@ npm run dev            # http://localhost:5173
 ## Stack
 
 - **Frontend:** React 18, Vite, TypeScript, Tailwind CSS, React Router, Recharts, lucide-react
-- **Backend:** Node.js, Express, TypeScript, Prisma ORM, PostgreSQL, JWT
+- **Backend:** Node.js, Express, TypeScript, Supabase (`@supabase/supabase-js`), PostgreSQL, JWT
