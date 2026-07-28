@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation, Navigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -10,6 +10,7 @@ const TITLES: Record<string, string> = {
   '/contas': 'Gestão de Contas',
   '/relatorios': 'Relatórios e Exportação',
   '/usuarios': 'Controle de Usuários',
+  '/auditoria': 'Trilha de Auditoria',
   '/documentos': 'Documentos (GED)',
 };
 
@@ -18,11 +19,16 @@ export function AppLayout() {
   const { user } = useAuth();
   const { pathname } = useLocation();
 
+  const title = TITLES[pathname] ?? 'APOINME';
+
+  // Título da aba do navegador acompanha a página atual.
+  useEffect(() => {
+    document.title = `${title} · APOINME`;
+  }, [title]);
+
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-
-  const title = TITLES[pathname] ?? 'APOINME';
 
   return (
     <div className="flex min-h-screen bg-plane">

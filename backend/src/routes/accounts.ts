@@ -2,9 +2,31 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { accountToJson } from '../lib/serialize.js';
-import { requireRole, CAN_WRITE } from '../middleware/auth.js';
+import { requireRole, CAN_WRITE, type AuthedRequest } from '../middleware/auth.js';
+import { logAudit, getClientIp, diffDetails } from '../lib/audit.js';
 
 export const accountsRouter = Router();
+
+const TIPO_LABEL: Record<string, string> = {
+  CORRENTE: 'Conta corrente',
+  POUPANCA: 'Poupança / Reserva',
+  CAIXA: 'Caixa',
+};
+
+/** Snapshot legível da conta para os detalhes da auditoria. */
+function accountSnapshot(a: {
+  name: string;
+  bank?: string | null;
+  type: string;
+  balance: string | number;
+}) {
+  return {
+    'Nome': a.name,
+    'Banco': a.bank || null,
+    'Tipo': TIPO_LABEL[a.type] ?? a.type,
+    'Saldo inicial (R$)': Number(a.balance),
+  };
+}
 
 const accountSchema = z.object({
   name: z.string().min(1),
@@ -49,7 +71,7 @@ accountsRouter.get('/', async (_req, res) => {
 });
 
 // POST /api/accounts
-accountsRouter.post('/', requireRole(...CAN_WRITE), async (req, res) => {
+accountsRouter.post('/', requireRole(...CAN_WRITE), async (req: AuthedRequest, res) => {
   const parsed = accountSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos' });
 
@@ -60,13 +82,32 @@ accountsRouter.post('/', requireRole(...CAN_WRITE), async (req, res) => {
     .single();
   if (error || !account) return res.status(500).json({ error: 'Erro ao criar conta' });
 
+  if (req.userId) {
+    await logAudit({
+      userId: req.userId,
+      action: 'CRIOU',
+      ip: getClientIp(req),
+      entityType: 'CONTA',
+      entityLabel: account.name,
+      details: accountSnapshot(account),
+    });
+  }
+
   return res.status(201).json(accountToJson(account, Number(account.balance)));
 });
 
 // PUT /api/accounts/:id
-accountsRouter.put('/:id', requireRole(...CAN_WRITE), async (req, res) => {
+accountsRouter.put('/:id', requireRole(...CAN_WRITE), async (req: AuthedRequest, res) => {
+  const auditIp = getClientIp(req);
   const parsed = accountSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos' });
+
+  const { data: existing } = await supabase
+    .from('Account')
+    .select()
+    .eq('id', String(req.params.id))
+    .maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Conta não encontrada' });
 
   const { data: account, error } = await supabase
     .from('Account')
@@ -76,11 +117,22 @@ accountsRouter.put('/:id', requireRole(...CAN_WRITE), async (req, res) => {
     .maybeSingle();
   if (error || !account) return res.status(404).json({ error: 'Conta não encontrada' });
 
+  if (req.userId) {
+    await logAudit({
+      userId: req.userId,
+      action: 'EDITOU',
+      ip: auditIp,
+      entityType: 'CONTA',
+      entityLabel: account.name,
+      details: diffDetails(accountSnapshot(existing), accountSnapshot(account)),
+    });
+  }
+
   return res.json(accountToJson(account, Number(account.balance)));
 });
 
 // DELETE /api/accounts/:id
-accountsRouter.delete('/:id', requireRole(...CAN_WRITE), async (req, res) => {
+accountsRouter.delete('/:id', requireRole(...CAN_WRITE), async (req: AuthedRequest, res) => {
   const { count } = await supabase
     .from('Transaction')
     .select('id', { count: 'exact', head: true })
@@ -95,9 +147,21 @@ accountsRouter.delete('/:id', requireRole(...CAN_WRITE), async (req, res) => {
     .from('Account')
     .delete()
     .eq('id', String(req.params.id))
-    .select('id');
+    .select();
   if (error || !data || data.length === 0) {
     return res.status(404).json({ error: 'Conta não encontrada' });
   }
+
+  if (req.userId) {
+    await logAudit({
+      userId: req.userId,
+      action: 'EXCLUIU',
+      ip: getClientIp(req),
+      entityType: 'CONTA',
+      entityLabel: data[0].name as string,
+      details: accountSnapshot(data[0]),
+    });
+  }
+
   return res.status(204).end();
 });

@@ -25,7 +25,8 @@ export interface Account {
   id: string;
   name: string;
   bank: string;
-  balance: number;
+  balance: number; // saldo atual (inicial + transações pagas)
+  initialBalance: number;
   type: 'corrente' | 'poupanca' | 'caixa';
 }
 

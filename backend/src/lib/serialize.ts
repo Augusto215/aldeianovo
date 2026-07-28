@@ -47,6 +47,7 @@ export type AccountJson = {
   bank: string;
   type: 'corrente' | 'poupanca' | 'caixa';
   balance: number;
+  initialBalance: number;
 };
 
 type AccountRow = {
@@ -54,6 +55,7 @@ type AccountRow = {
   name: string;
   bank: string | null;
   type: 'CORRENTE' | 'POUPANCA' | 'CAIXA';
+  balance: string | number;
 };
 
 export function accountToJson(a: AccountRow, currentBalance: number): AccountJson {
@@ -63,6 +65,7 @@ export function accountToJson(a: AccountRow, currentBalance: number): AccountJso
     bank: a.bank ?? '—',
     type: a.type.toLowerCase() as AccountJson['type'],
     balance: currentBalance,
+    initialBalance: Number(a.balance),
   };
 }
 
