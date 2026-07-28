@@ -115,13 +115,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        <div className="absolute bottom-0 w-full border-t border-hairline p-4">
-          <p className="text-[11px] leading-relaxed text-ink-muted">
-            MVP · v0.1.0
-            <br />
-            Dados de demonstração
-          </p>
-        </div>
       </aside>
     </>
   );
