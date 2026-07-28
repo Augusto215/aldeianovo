@@ -4,10 +4,28 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { userToJson } from '../lib/serialize.js';
 import { requireRole, type AuthedRequest } from '../middleware/auth.js';
+import { logAudit, getClientIp, diffDetails } from '../lib/audit.js';
 
 export const usersRouter = Router();
 
 const ROLES = ['ADMIN', 'COORDENACAO', 'FINANCEIRO', 'LEITURA'] as const;
+
+const ROLE_LABEL: Record<string, string> = {
+  ADMIN: 'Administrador',
+  COORDENACAO: 'Coordenação',
+  FINANCEIRO: 'Financeiro',
+  LEITURA: 'Leitura',
+};
+
+/** Snapshot legível do usuário para os detalhes da auditoria. */
+function userSnapshot(u: { name: string; email: string; role: string; active: boolean }) {
+  return {
+    'Nome': u.name,
+    'E-mail': u.email,
+    'Perfil': ROLE_LABEL[u.role] ?? u.role,
+    'Situação': u.active ? 'Ativo' : 'Desativado',
+  };
+}
 
 // GET /api/users
 usersRouter.get('/', async (_req, res) => {
@@ -21,7 +39,7 @@ usersRouter.get('/', async (_req, res) => {
 });
 
 // POST /api/users — apenas ADMIN cria usuários
-usersRouter.post('/', requireRole('ADMIN'), async (req, res) => {
+usersRouter.post('/', requireRole('ADMIN'), async (req: AuthedRequest, res) => {
   const parsed = z
     .object({
       name: z.string().min(1),
@@ -55,11 +73,23 @@ usersRouter.post('/', requireRole('ADMIN'), async (req, res) => {
     .single();
   if (error || !user) return res.status(500).json({ error: 'Erro ao criar usuário' });
 
+  if (req.userId) {
+    await logAudit({
+      userId: req.userId,
+      action: 'CRIOU',
+      ip: getClientIp(req),
+      entityType: 'USUARIO',
+      entityLabel: user.name,
+      details: userSnapshot(user),
+    });
+  }
+
   return res.status(201).json(userToJson(user));
 });
 
 // PUT /api/users/:id — apenas ADMIN altera perfil/situação
 usersRouter.put('/:id', requireRole('ADMIN'), async (req: AuthedRequest, res) => {
+  const auditIp = getClientIp(req);
   const parsed = z
     .object({
       name: z.string().min(1).optional(),
@@ -73,6 +103,13 @@ usersRouter.put('/:id', requireRole('ADMIN'), async (req: AuthedRequest, res) =>
     return res.status(400).json({ error: 'Você não pode desativar a si mesmo' });
   }
 
+  const { data: existing } = await supabase
+    .from('User')
+    .select()
+    .eq('id', String(req.params.id))
+    .maybeSingle();
+  if (!existing) return res.status(404).json({ error: 'Usuário não encontrado' });
+
   const { data: user, error } = await supabase
     .from('User')
     .update(parsed.data)
@@ -80,6 +117,17 @@ usersRouter.put('/:id', requireRole('ADMIN'), async (req: AuthedRequest, res) =>
     .select()
     .maybeSingle();
   if (error || !user) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+  if (req.userId) {
+    await logAudit({
+      userId: req.userId,
+      action: 'EDITOU',
+      ip: auditIp,
+      entityType: 'USUARIO',
+      entityLabel: user.name,
+      details: diffDetails(userSnapshot(existing), userSnapshot(user)),
+    });
+  }
 
   return res.json(userToJson(user));
 });

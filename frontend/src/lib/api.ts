@@ -49,6 +49,25 @@ export const api = {
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
+/** Envia um arquivo (multipart/form-data) autenticado. */
+export async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(res.status, body?.error ?? `Erro ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 /** Baixa um arquivo autenticado (ex.: exportação CSV). */
 export async function downloadFile(path: string, filename: string) {
   const token = localStorage.getItem(TOKEN_KEY);

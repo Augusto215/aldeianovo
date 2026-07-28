@@ -12,11 +12,11 @@ export function Modal({ open, title, onClose, children }: ModalProps) {
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-xl bg-white shadow-card"
+        className="animate-pop-in flex w-full max-w-md max-h-[85vh] flex-col rounded-2xl bg-white shadow-xl ring-1 ring-black/5"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal
@@ -25,13 +25,13 @@ export function Modal({ open, title, onClose, children }: ModalProps) {
           <h2 className="text-sm font-semibold text-ink">{title}</h2>
           <button
             onClick={onClose}
-            className="text-ink-muted hover:text-ink"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-plane hover:text-ink"
             aria-label="Fechar"
           >
             <X size={18} />
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="overflow-y-auto p-5">{children}</div>
       </div>
     </div>
   );

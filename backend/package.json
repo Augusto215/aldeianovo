@@ -7,7 +7,9 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "db:seed": "tsx src/scripts/seed.ts"
+    "db:seed": "tsx src/scripts/seed.ts",
+    "create:admin": "tsx src/scripts/createMainAdmin.ts",
+    "create:bucket": "tsx src/scripts/createDossieBucket.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
@@ -16,6 +18,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.3",
     "ws": "^8.18.0",
     "zod": "^3.23.8"
   },
@@ -24,7 +28,9 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.7",
+    "@types/multer": "^2.2.0",
     "@types/node": "^22.9.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/ws": "^8.5.12",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"

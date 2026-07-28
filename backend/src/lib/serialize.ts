@@ -14,6 +14,11 @@ type TxWithRelations = {
   categoryId: string | null;
   account: { name: string } | null;
   category: { name: string } | null;
+  mes: string | null;
+  financiador: string | null;
+  favorecido: string | null;
+  cpfCnpj: string | null;
+  dossie: string | null;
 };
 
 export function txToJson(t: TxWithRelations) {
@@ -28,6 +33,11 @@ export function txToJson(t: TxWithRelations) {
     type: t.type.toLowerCase() as 'receita' | 'despesa',
     amount: Number(t.amount),
     status: t.status.toLowerCase() as 'pago' | 'pendente',
+    mes: t.mes ?? '',
+    financiador: t.financiador ?? '',
+    favorecido: t.favorecido ?? '',
+    cpfCnpj: t.cpfCnpj ?? '',
+    dossie: t.dossie ?? '',
   };
 }
 

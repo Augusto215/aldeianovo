@@ -14,6 +14,11 @@ export interface Transaction {
   type: TxType;
   amount: number;
   status: TxStatus;
+  mes: string;
+  financiador: string;
+  favorecido: string;
+  cpfCnpj: string;
+  dossie: string;
 }
 
 export interface Account {
@@ -38,6 +43,39 @@ export interface User {
 export interface Category {
   id: string;
   name: string;
+}
+
+export type AuditAction =
+  | 'visualizou'
+  | 'baixou'
+  | 'editou'
+  | 'assinou'
+  | 'excluiu'
+  | 'criou'
+  | 'entrou';
+
+export type AuditEntityType = 'TRANSACAO' | 'CONTA' | 'USUARIO' | 'DOCUMENTO' | 'SESSAO';
+
+/** Valor simples (criação/exclusão) ou `{ de, para }` (edição). */
+export type AuditDetailValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { de: string | number | boolean | null; para: string | number | boolean | null };
+
+export interface AuditLogEntry {
+  id: string;
+  action: AuditAction;
+  ipAddress: string;
+  createdAt: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  documentId: string | null;
+  entityType: AuditEntityType | null;
+  entityLabel: string | null;
+  details: Record<string, AuditDetailValue> | null;
 }
 
 export interface CashFlowMonth {

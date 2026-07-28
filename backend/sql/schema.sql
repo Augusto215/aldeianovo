@@ -12,7 +12,7 @@ CREATE TYPE "AccountType" AS ENUM ('CORRENTE', 'POUPANCA', 'CAIXA');
 CREATE TYPE "TxType" AS ENUM ('RECEITA', 'DESPESA');
 CREATE TYPE "TxStatus" AS ENUM ('PAGO', 'PENDENTE');
 CREATE TYPE "DocumentStatus" AS ENUM ('RASCUNHO', 'EM_REVISAO', 'APROVADO', 'CONGELADO', 'ARQUIVADO', 'DESCARTADO');
-CREATE TYPE "AuditAction" AS ENUM ('VISUALIZOU', 'BAIXOU', 'EDITOU', 'ASSINOU', 'EXCLUIU');
+CREATE TYPE "AuditAction" AS ENUM ('VISUALIZOU', 'BAIXOU', 'EDITOU', 'ASSINOU', 'EXCLUIU', 'CRIOU', 'ENTROU');
 
 -- ─────────────────────────────────────────────────────────────
 -- Usuários e permissões (Etapa 1)
@@ -64,6 +64,11 @@ CREATE TABLE "Transaction" (
     "type"        "TxType" NOT NULL,
     "status"      "TxStatus" NOT NULL DEFAULT 'PENDENTE',
     "date"        date NOT NULL DEFAULT CURRENT_DATE,
+    "mes"         TEXT,
+    "financiador" TEXT,
+    "favorecido"  TEXT,
+    "cpfCnpj"     TEXT,
+    "dossie"      TEXT,
     "createdAt"   timestamptz NOT NULL DEFAULT now(),
     "accountId"   uuid NOT NULL REFERENCES "Account"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     "categoryId"  uuid REFERENCES "Category"("id") ON DELETE SET NULL ON UPDATE CASCADE,
@@ -72,6 +77,25 @@ CREATE TABLE "Transaction" (
 
 CREATE INDEX "Transaction_date_idx" ON "Transaction"("date");
 CREATE INDEX "Transaction_type_idx" ON "Transaction"("type");
+
+-- Caso este schema já tenha sido rodado antes (banco existente no Supabase),
+-- rode só este bloco para adicionar os novos campos de Entradas/Saídas
+-- (Mês, Financiador/Projeto, Favorecido, CPF/CNPJ, Dossiê) e as novas ações
+-- de auditoria (CRIOU, ENTROU) usadas pela trilha de auditoria:
+-- ALTER TABLE "Transaction" ADD COLUMN IF NOT EXISTS "mes" TEXT;
+-- ALTER TABLE "Transaction" ADD COLUMN IF NOT EXISTS "financiador" TEXT;
+-- ALTER TABLE "Transaction" ADD COLUMN IF NOT EXISTS "favorecido" TEXT;
+-- ALTER TABLE "Transaction" ADD COLUMN IF NOT EXISTS "cpfCnpj" TEXT;
+-- ALTER TABLE "Transaction" ADD COLUMN IF NOT EXISTS "dossie" TEXT;
+-- ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'CRIOU';
+-- ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'ENTROU';
+
+-- Trilha de auditoria mais discriminada: o que foi afetado (entityType), um
+-- rótulo legível (entityLabel) e os detalhes do evento (details: snapshot do
+-- que foi criado/excluído ou o "antes → depois" de cada campo editado).
+-- ALTER TABLE "AuditLog" ADD COLUMN IF NOT EXISTS "entityType" TEXT;
+-- ALTER TABLE "AuditLog" ADD COLUMN IF NOT EXISTS "entityLabel" TEXT;
+-- ALTER TABLE "AuditLog" ADD COLUMN IF NOT EXISTS "details" JSONB;
 
 -- ─────────────────────────────────────────────────────────────
 -- GED — Gestão Eletrônica de Documentos (Etapa 2)
@@ -127,12 +151,20 @@ CREATE TABLE "DocumentVersion" (
 -- a aplicação NÃO deve expor UPDATE/DELETE nesta tabela (nem para
 -- administradores); reforçado abaixo revogando esses privilégios.
 CREATE TABLE "AuditLog" (
-    "id"         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    "action"     "AuditAction" NOT NULL,
-    "ipAddress"  TEXT NOT NULL,
-    "createdAt"  timestamptz NOT NULL DEFAULT now(),
-    "userId"     uuid NOT NULL REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
-    "documentId" uuid REFERENCES "Document"("id") ON DELETE SET NULL ON UPDATE CASCADE
+    "id"          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "action"      "AuditAction" NOT NULL,
+    "ipAddress"   TEXT NOT NULL,
+    "createdAt"   timestamptz NOT NULL DEFAULT now(),
+    "userId"      uuid NOT NULL REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    "documentId"  uuid REFERENCES "Document"("id") ON DELETE SET NULL ON UPDATE CASCADE,
+    -- O que foi afetado pela ação (ex.: "TRANSACAO", "USUARIO", "CONTA",
+    -- "SESSAO") e um rótulo legível (ex.: nome da transação/usuário/conta),
+    -- para deixar a trilha discriminada sem precisar de outro join.
+    "entityType"  TEXT,
+    "entityLabel" TEXT,
+    -- Detalhes do evento: snapshot (criação/exclusão) ou {campo: {de, para}}
+    -- (edição), para o "Visualizar" da trilha de auditoria.
+    "details"     JSONB
 );
 
 CREATE INDEX "AuditLog_createdAt_idx" ON "AuditLog"("createdAt");

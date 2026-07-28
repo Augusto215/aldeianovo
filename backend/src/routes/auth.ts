@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { env } from '../env.js';
 import { supabase } from '../lib/supabase.js';
 import { userToJson } from '../lib/serialize.js';
+import { sendEmail } from '../lib/mailer.js';
+import { logAudit, getClientIp } from '../lib/audit.js';
 
 export const authRouter = Router();
 
@@ -14,7 +16,38 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-// POST /api/auth/login
+const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutos
+
+function issueAccessToken(user: { id: string; role: string }) {
+  return jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, {
+    expiresIn: env.jwtExpiresIn as jwt.SignOptions['expiresIn'],
+  });
+}
+
+async function issueAndSendCode(user: { id: string; email: string; name: string }) {
+  const code = crypto.randomInt(100000, 999999).toString();
+  const codeHash = await bcrypt.hash(code, 10);
+  await supabase
+    .from('User')
+    .update({
+      twoFactorSecret: JSON.stringify({
+        codeHash,
+        expiresAt: new Date(Date.now() + CODE_TTL_MS).toISOString(),
+      }),
+    })
+    .eq('id', user.id);
+
+  await sendEmail({
+    to: user.email,
+    subject: 'Seu código de acesso — Gestão Financeira APOINME',
+    text:
+      `Olá, ${user.name}.\n\n` +
+      `Seu código de verificação é: ${code}\n\n` +
+      `Ele expira em 10 minutos. Se você não tentou entrar na plataforma, ignore este e-mail.`,
+  });
+}
+
+// POST /api/auth/login — 1ª etapa: valida e-mail/senha e envia código por e-mail
 authRouter.post('/login', async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -32,11 +65,103 @@ authRouter.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'E-mail ou senha incorretos' });
   }
 
-  const token = jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, {
-    expiresIn: env.jwtExpiresIn as jwt.SignOptions['expiresIn'],
+  if (!env.twoFactorEnabled) {
+    await logAudit({
+      userId: user.id,
+      action: 'ENTROU',
+      ip: getClientIp(req),
+      entityType: 'SESSAO',
+      entityLabel: `Login de ${user.name}`,
+    });
+    return res.json({
+      requiresCode: false,
+      token: issueAccessToken(user),
+      user: userToJson(user),
+    });
+  }
+
+  await issueAndSendCode(user);
+
+  const pendingToken = jwt.sign({ sub: user.id, purpose: 'login-2fa' }, env.jwtSecret, {
+    expiresIn: '10m',
   });
 
-  return res.json({ token, user: userToJson(user) });
+  return res.json({ requiresCode: true, pendingToken, email: user.email });
+});
+
+// POST /api/auth/login/verify — 2ª etapa: confirma o código recebido por e-mail
+authRouter.post('/login/verify', async (req, res) => {
+  const parsed = z
+    .object({ pendingToken: z.string().min(1), code: z.string().min(1) })
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos' });
+
+  let payload: { sub: string; purpose: string };
+  try {
+    payload = jwt.verify(parsed.data.pendingToken, env.jwtSecret) as typeof payload;
+  } catch {
+    return res.status(401).json({ error: 'Sessão de login expirada, entre novamente' });
+  }
+  if (payload.purpose !== 'login-2fa') {
+    return res.status(401).json({ error: 'Token inválido' });
+  }
+
+  const { data: user } = await supabase
+    .from('User')
+    .select('*')
+    .eq('id', payload.sub)
+    .maybeSingle();
+  if (!user || !user.active) {
+    return res.status(401).json({ error: 'Usuário não encontrado ou inativo' });
+  }
+
+  const pending = user.twoFactorSecret ? JSON.parse(user.twoFactorSecret) : null;
+  if (!pending || new Date(pending.expiresAt) < new Date()) {
+    return res.status(400).json({ error: 'Código expirado, solicite um novo' });
+  }
+  if (!(await bcrypt.compare(parsed.data.code, pending.codeHash))) {
+    return res.status(401).json({ error: 'Código inválido' });
+  }
+
+  await supabase.from('User').update({ twoFactorSecret: null }).eq('id', user.id);
+
+  await logAudit({
+    userId: user.id,
+    action: 'ENTROU',
+    ip: getClientIp(req),
+    entityType: 'SESSAO',
+    entityLabel: `Login de ${user.name}`,
+  });
+
+  return res.json({ token: issueAccessToken(user), user: userToJson(user) });
+});
+
+// POST /api/auth/login/resend — reenvia um novo código para a etapa em andamento
+authRouter.post('/login/resend', async (req, res) => {
+  const parsed = z.object({ pendingToken: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos' });
+
+  let payload: { sub: string; purpose: string };
+  try {
+    payload = jwt.verify(parsed.data.pendingToken, env.jwtSecret) as typeof payload;
+  } catch {
+    return res.status(401).json({ error: 'Sessão de login expirada, entre novamente' });
+  }
+  if (payload.purpose !== 'login-2fa') {
+    return res.status(401).json({ error: 'Token inválido' });
+  }
+
+  const { data: user } = await supabase
+    .from('User')
+    .select('id, email, name, active')
+    .eq('id', payload.sub)
+    .maybeSingle();
+  if (!user || !user.active) {
+    return res.status(401).json({ error: 'Usuário não encontrado ou inativo' });
+  }
+
+  await issueAndSendCode(user);
+  return res.json({ ok: true });
 });
 
 // POST /api/auth/forgot-password

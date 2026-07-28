@@ -8,6 +8,7 @@ import { Accounts } from '@/pages/Accounts';
 import { Reports } from '@/pages/Reports';
 import { Users } from '@/pages/Users';
 import { Documents } from '@/pages/Documents';
+import { Audit } from '@/pages/Audit';
 import { ForgotPassword } from '@/pages/ForgotPassword';
 
 /** Envolve toda a árvore com o provider de autenticação. */
@@ -28,6 +29,7 @@ export const router = createBrowserRouter([
       { path: '/contas', element: <Accounts /> },
       { path: '/relatorios', element: <Reports /> },
       { path: '/usuarios', element: <Users /> },
+      { path: '/auditoria', element: <Audit /> },
       { path: '/documentos', element: <Documents /> },
     ],
   },
